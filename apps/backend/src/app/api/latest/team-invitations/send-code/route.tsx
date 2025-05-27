@@ -2,7 +2,7 @@ import { ensureUserTeamPermissionExists } from "@/lib/request-checks";
 import { retryTransaction } from "@/prisma-client";
 import { createSmartRouteHandler } from "@/route-handlers/smart-route-handler";
 import { KnownErrors } from "@stackframe/stack-shared";
-import { adaptSchema, clientOrHigherAuthTypeSchema, teamIdSchema, teamInvitationCallbackUrlSchema, teamInvitationEmailSchema, yupBoolean, yupNumber, yupObject, yupString } from "@stackframe/stack-shared/dist/schema-fields";
+import { adaptSchema, clientOrHigherAuthTypeSchema, permissionDefinitionIdSchema, teamIdSchema, teamInvitationCallbackUrlSchema, teamInvitationEmailSchema, yupArray, yupBoolean, yupNumber, yupObject, yupString } from "@stackframe/stack-shared/dist/schema-fields";
 import { teamInvitationCodeHandler } from "../accept/verification-code-handler";
 
 export const POST = createSmartRouteHandler({
@@ -21,6 +21,7 @@ export const POST = createSmartRouteHandler({
       team_id: teamIdSchema.defined(),
       email: teamInvitationEmailSchema.defined(),
       callback_url: teamInvitationCallbackUrlSchema.defined(),
+      permissions: yupArray(permissionDefinitionIdSchema.defined()).optional(),
     }).defined(),
   }),
   response: yupObject({
@@ -44,6 +45,19 @@ export const POST = createSmartRouteHandler({
           errorType: 'required',
           recursive: true,
         });
+
+        if (body.permissions) {
+          for (const permissionId of body.permissions) {
+            await ensureUserTeamPermissionExists(tx, {
+              tenancy: auth.tenancy,
+              userId: auth.user.id,
+              teamId: body.team_id,
+              permissionId,
+              errorType: 'required',
+              recursive: true,
+            });
+          }
+        }
       }
     });
 
@@ -51,6 +65,7 @@ export const POST = createSmartRouteHandler({
       tenancy: auth.tenancy,
       data: {
         team_id: body.team_id,
+        permissions: body.permissions,
       },
       method: {
         email: body.email,

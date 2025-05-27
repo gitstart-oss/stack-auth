@@ -465,3 +465,304 @@ it("requires $remove_members permission to revoke invitations", async ({ expect 
     }
   `);
 });
+
+it("can send invitation with permissions", async ({ expect }) => {
+  const { userId: userId1 } = await Auth.Otp.signIn();
+  const { teamId } = await createAndAddCurrentUserWithoutMemberPermission();
+
+  const receiveMailbox = createMailbox();
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$invite_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$read_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  const sendTeamInvitationResponse = await niceBackendFetch("/api/v1/team-invitations/send-code", {
+    method: "POST",
+    accessType: "client",
+    body: {
+      email: receiveMailbox.emailAddress,
+      team_id: teamId,
+      callback_url: "http://localhost:12345/some-callback-url",
+      permissions: ["$read_members"],
+    },
+  });
+
+  expect(sendTeamInvitationResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 200,
+      "body": {
+        "id": "<stripped UUID>",
+        "success": true,
+      },
+      "headers": Headers { <some fields may have been hidden> },
+    }
+  `);
+
+  backendContext.set({ mailbox: receiveMailbox });
+  const { userId: userId2 } = await Auth.Otp.signIn();
+
+  await Team.acceptInvitation();
+
+  const permissionsResponse = await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId2}`, {
+    accessType: "server",
+    method: "GET",
+  });
+  expect(permissionsResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 200,
+      "body": {
+        "is_paginated": false,
+        "items": [
+          {
+            "id": "$read_members",
+            "team_id": "<stripped UUID>",
+            "user_id": "<stripped UUID>",
+          },
+          {
+            "id": "team_member",
+            "team_id": "<stripped UUID>",
+            "user_id": "<stripped UUID>",
+          },
+        ],
+      },
+      "headers": Headers { <some fields may have been hidden> },
+    }
+  `);
+});
+
+it("requires inviter to have permissions they're trying to grant", async ({ expect }) => {
+  const { userId: userId1 } = await Auth.Otp.signIn();
+  const { teamId } = await createAndAddCurrentUserWithoutMemberPermission();
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$invite_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  const sendTeamInvitationResponse = await niceBackendFetch("/api/v1/team-invitations/send-code", {
+    method: "POST",
+    accessType: "client",
+    body: {
+      email: "some-email-test@example.com",
+      team_id: teamId,
+      callback_url: "http://localhost:12345/some-callback-url",
+      permissions: ["$read_members"],
+    },
+  });
+
+  expect(sendTeamInvitationResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 401,
+      "body": {
+        "code": "TEAM_PERMISSION_REQUIRED",
+        "details": {
+          "permission_id": "$read_members",
+          "team_id": "<stripped UUID>",
+          "user_id": "<stripped UUID>",
+        },
+        "error": "User <stripped UUID> does not have permission $read_members in team <stripped UUID>.",
+      },
+      "headers": Headers {
+        "x-stack-known-error": "TEAM_PERMISSION_REQUIRED",
+        <some fields may have been hidden>,
+      },
+    }
+  `);
+});
+
+it("validates permission format in invitation", async ({ expect }) => {
+  const { userId: userId1 } = await Auth.Otp.signIn();
+  const { teamId } = await createAndAddCurrentUserWithoutMemberPermission();
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$invite_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  const sendTeamInvitationResponse = await niceBackendFetch("/api/v1/team-invitations/send-code", {
+    method: "POST",
+    accessType: "client",
+    body: {
+      email: "some-email-test@example.com",
+      team_id: teamId,
+      callback_url: "http://localhost:12345/some-callback-url",
+      permissions: ["invalid-permission-format"],
+    },
+  });
+
+  expect(sendTeamInvitationResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 400,
+      "body": {
+        "code": "SCHEMA_ERROR",
+        "details": {
+          "message": deindent\`
+            Request validation failed on POST /api/v1/team-invitations/send-code:
+              - body.permissions[0] Only lowercase letters, numbers, ":", "_" and optional "$" at the beginning are allowed
+          \`,
+        },
+        "error": deindent\`
+          Request validation failed on POST /api/v1/team-invitations/send-code:
+            - body.permissions[0] Only lowercase letters, numbers, ":", "_" and optional "$" at the beginning are allowed
+        \`,
+      },
+      "headers": Headers {
+        "x-stack-known-error": "SCHEMA_ERROR",
+        <some fields may have been hidden>,
+      },
+    }
+  `);
+});
+
+it("can send invitation with multiple permissions", async ({ expect }) => {
+  const { userId: userId1 } = await Auth.Otp.signIn();
+  const { teamId } = await createAndAddCurrentUserWithoutMemberPermission();
+
+  const receiveMailbox = createMailbox();
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$invite_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$read_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$remove_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  const sendTeamInvitationResponse = await niceBackendFetch("/api/v1/team-invitations/send-code", {
+    method: "POST",
+    accessType: "client",
+    body: {
+      email: receiveMailbox.emailAddress,
+      team_id: teamId,
+      callback_url: "http://localhost:12345/some-callback-url",
+      permissions: ["$read_members", "$remove_members"],
+    },
+  });
+
+  expect(sendTeamInvitationResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 200,
+      "body": {
+        "id": "<stripped UUID>",
+        "success": true,
+      },
+      "headers": Headers { <some fields may have been hidden> },
+    }
+  `);
+
+  backendContext.set({ mailbox: receiveMailbox });
+  const { userId: userId2 } = await Auth.Otp.signIn();
+
+  await Team.acceptInvitation();
+
+  const permissionsResponse = await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId2}`, {
+    accessType: "server",
+    method: "GET",
+  });
+  expect(permissionsResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 200,
+      "body": {
+        "is_paginated": false,
+        "items": [
+          {
+            "id": "$read_members",
+            "team_id": "<stripped UUID>",
+            "user_id": "<stripped UUID>",
+          },
+          {
+            "id": "$remove_members",
+            "team_id": "<stripped UUID>",
+            "user_id": "<stripped UUID>",
+          },
+          {
+            "id": "team_member",
+            "team_id": "<stripped UUID>",
+            "user_id": "<stripped UUID>",
+          },
+        ],
+      },
+      "headers": Headers { <some fields may have been hidden> },
+    }
+  `);
+});
+
+it("maintains backwards compatibility without permissions parameter", async ({ expect }) => {
+  const { userId: userId1 } = await Auth.Otp.signIn();
+  const { teamId } = await createAndAddCurrentUserWithoutMemberPermission();
+
+  const receiveMailbox = createMailbox();
+
+  await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId1}/$invite_members`, {
+    accessType: "server",
+    method: "POST",
+    body: {},
+  });
+
+  const sendTeamInvitationResponse = await niceBackendFetch("/api/v1/team-invitations/send-code", {
+    method: "POST",
+    accessType: "client",
+    body: {
+      email: receiveMailbox.emailAddress,
+      team_id: teamId,
+      callback_url: "http://localhost:12345/some-callback-url",
+    },
+  });
+
+  expect(sendTeamInvitationResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 200,
+      "body": {
+        "id": "<stripped UUID>",
+        "success": true,
+      },
+      "headers": Headers { <some fields may have been hidden> },
+    }
+  `);
+
+  backendContext.set({ mailbox: receiveMailbox });
+  const { userId: userId2 } = await Auth.Otp.signIn();
+
+  await Team.acceptInvitation();
+
+  const permissionsResponse = await niceBackendFetch(`/api/v1/team-permissions/${teamId}/${userId2}`, {
+    accessType: "server",
+    method: "GET",
+  });
+  expect(permissionsResponse).toMatchInlineSnapshot(`
+    NiceResponse {
+      "status": 200,
+      "body": {
+        "is_paginated": false,
+        "items": [
+          {
+            "id": "team_member",
+            "team_id": "<stripped UUID>",
+            "user_id": "<stripped UUID>",
+          },
+        ],
+      },
+      "headers": Headers { <some fields may have been hidden> },
+    }
+  `);
+});

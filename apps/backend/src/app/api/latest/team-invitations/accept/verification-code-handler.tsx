@@ -1,11 +1,12 @@
 import { teamMembershipsCrudHandlers } from "@/app/api/latest/team-memberships/crud";
 import { sendEmailFromTemplate } from "@/lib/emails";
+import { grantTeamPermission } from "@/lib/permissions";
 import { getSoleTenancyFromProjectBranch } from "@/lib/tenancies";
-import { prismaClient } from "@/prisma-client";
+import { prismaClient, retryTransaction } from "@/prisma-client";
 import { createVerificationCodeHandler } from "@/route-handlers/verification-code-handler";
 import { VerificationCodeType } from "@prisma/client";
 import { KnownErrors } from "@stackframe/stack-shared";
-import { emailSchema, yupNumber, yupObject, yupString } from "@stackframe/stack-shared/dist/schema-fields";
+import { emailSchema, yupArray, yupNumber, yupObject, yupString } from "@stackframe/stack-shared/dist/schema-fields";
 import { teamsCrudHandlers } from "../../teams/crud";
 
 export const teamInvitationCodeHandler = createVerificationCodeHandler({
@@ -29,6 +30,7 @@ export const teamInvitationCodeHandler = createVerificationCodeHandler({
   type: VerificationCodeType.TEAM_INVITATION,
   data: yupObject({
     team_id: yupString().defined(),
+    permissions: yupArray(yupString().defined()).optional(),
   }).defined(),
   method: yupObject({
     email: emailSchema.defined(),
@@ -69,24 +71,37 @@ export const teamInvitationCodeHandler = createVerificationCodeHandler({
   async handler(tenancy, {}, data, body, user) {
     if (!user) throw new KnownErrors.UserAuthenticationRequired;
 
-    const oldMembership = await prismaClient.teamMember.findUnique({
-      where: {
-        tenancyId_projectUserId_teamId: {
-          tenancyId: tenancy.id,
-          projectUserId: user.id,
-          teamId: data.team_id,
+    await retryTransaction(async (tx) => {
+      const oldMembership = await tx.teamMember.findUnique({
+        where: {
+          tenancyId_projectUserId_teamId: {
+            tenancyId: tenancy.id,
+            projectUserId: user.id,
+            teamId: data.team_id,
+          },
         },
-      },
-    });
-
-    if (!oldMembership) {
-      await teamMembershipsCrudHandlers.adminCreate({
-        tenancy,
-        team_id: data.team_id,
-        user_id: user.id,
-        data: {},
       });
-    }
+
+      if (!oldMembership) {
+        await teamMembershipsCrudHandlers.adminCreate({
+          tenancy,
+          team_id: data.team_id,
+          user_id: user.id,
+          data: {},
+        });
+      }
+
+      if (data.permissions) {
+        for (const permissionId of data.permissions) {
+          await grantTeamPermission(tx, {
+            tenancy,
+            teamId: data.team_id,
+            userId: user.id,
+            permissionId,
+          });
+        }
+      }
+    });
 
     return {
       statusCode: 200,
