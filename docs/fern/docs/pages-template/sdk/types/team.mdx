@@ -244,6 +244,7 @@ An invitation email containing a magic link will be sent to the specified user. 
 declare function inviteUser(options: {
   email: string;
   callbackUrl?: string;
+  permissions?: string[];
 }): Promise<void>;
 ```
 

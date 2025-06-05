@@ -38,7 +38,7 @@ export type Team = {
   profileImageUrl: string | null,
   clientMetadata: any,
   clientReadOnlyMetadata: any,
-  inviteUser(options: { email: string, callbackUrl?: string }): Promise<void>,
+  inviteUser(options: { email: string, callbackUrl?: string, permissions?: string[] }): Promise<void>,
   listUsers(): Promise<TeamUser[]>,
   useUsers(): TeamUser[], // THIS_LINE_PLATFORM react-like
   listInvitations(): Promise<TeamInvitation[]>,
@@ -88,7 +88,7 @@ export type ServerTeam = {
   update(update: ServerTeamUpdateOptions): Promise<void>,
   delete(): Promise<void>,
   addUser(userId: string): Promise<void>,
-  inviteUser(options: { email: string, callbackUrl?: string }): Promise<void>,
+  inviteUser(options: { email: string, callbackUrl?: string, permissions?: string[] }): Promise<void>,
   removeUser(userId: string): Promise<void>,
 } & Team;
 
